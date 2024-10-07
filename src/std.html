@@ -1,0 +1,503 @@
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Application</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Sixtyfour+Convergence&display=swap" rel="stylesheet">
+</head>
+<body style="display: block; background-color:black;">
+	<canvas id="canv" style="position: absolute; left: 0; top: 0; z-index: 0; padding: 0; display: block;"></canvas>
+	<canvas id="canv2" style="position: absolute; left: 0; top: 0; z-index: 1; padding: 0; display: block;"></canvas>
+	<script>
+		var mx = 0;
+		var my = 0;
+		var keys = {};
+		window.onmousedown = function (event) {
+			keys[event.button] = true;
+			prunning = false;
+		};
+		window.onmouseup = function (event) {
+			keys[event.button] = false;
+		};
+		window.onkeydown = function (event) {
+			keys[event.keyCode] = true;
+			prunning = false;
+			/*console.log(event.keyCode);*/
+		};
+		window.onkeyup = function (event) {
+			keys[event.keyCode] = false;
+		};
+		window.onmousemove = function (event) {
+			mx = event.pageX;
+			my = event.pageY;
+		};
+		window.ontouchmove = function (event) {
+			var t = event.touches.item(event.touches.length - 1);
+			mx = t.pageX;
+			my = t.pageY;
+		};
+		window.ontouchstart = function (event) {
+			var t = event.touches.item(event.touches.length - 1);
+			mx = t.pageX;
+			my = t.pageY;
+			keys[0] = true;
+		};
+		window.ontouchend = function (event) {
+			var t = event.touches.item(event.touches.length - 1);
+			mx = t.pageX;
+			my = t.pageY;
+			keys[0] = false;
+			prunning = false;
+		};
+		window.addEventListener("gamepadconnected", (e) => {
+			console.log(
+				"Gamepad connected at index %d: %s. %d buttons, %d axes.",
+				e.gamepad.index,
+				e.gamepad.id,
+				e.gamepad.buttons.length,
+				e.gamepad.axes.length,
+			);
+		});
+		window.onload = function () {
+			initCode();
+		};
+		window.addEventListener('resize', resizeCanvas, false);
+		function resizeCanvas() {
+			canvas.width = window.innerWidth;
+			canvas.height = window.innerHeight;
+			canvas2.width = window.innerWidth;
+			canvas2.height = window.innerHeight;
+		};
+
+		var library;
+		var res;
+		var running = false;
+		var prunning = true;
+		var init = false;
+		var BINARY_B64 = "###WASM_BINARY_CODE###";
+		var BINARY_B64_HASH = "###WASM_BINARY_HASH###";
+
+		let objects = {};
+
+		const env = {
+			printMem: (ptr, len, t) => {
+				const bytes = new Uint8Array(library.memory.buffer, ptr, len);
+				const string = new TextDecoder('ascii').decode(bytes);
+				switch (t) {
+					case -1: { console.info(string); break; }
+					case 0: { console.log(string); break; }
+					case 1: { console.warn(string); break; }
+					case 2: { console.error(string); break; }
+				}
+			},
+			print: (a) => {
+				console.log(a);
+			},
+			time: () => {
+				return performance.now();
+			},
+			suspend: () => {
+				running = false;
+			},
+			throwExcep: (type) => {
+				if (type * 1 == 0)
+					console.error("Nullpointer Exception!");
+			},
+			createShader: (pointer) => {
+
+			},
+			createTexture: (pointer) => {
+
+			},
+			useShader: (pointer) => {
+
+			},
+			useTexture: (pointer) => {
+
+			},
+			drawQuad: (pointer) => {
+
+			},
+			glClear: (bits) => {
+				gl.clear(bits);
+			},
+			glClearColor: (r, g, b, a) => {
+				gl.clearColor(r, g, b, a);
+			},
+			glCreateShader: (vshader, fshader) => {
+				var v = getObjectStr(vshader);
+				var f = getObjectStr(fshader);
+				var shader = initShaderProgram(gl, v, f);
+				return regCObject(shader);
+			},
+			glCreateTexture: (image) => {
+				var tex = loadTexture(gl, 'data:image/png;base64,' + getObjectB64(image));
+				return regCObject(tex);
+			},
+			glCreateBuffer: () => {
+				return gl.createBuffer();
+			},
+			glDrawQuad: () => {
+				gl.disable(gl.DEPTH_TEST);
+				gl.enable(gl.BLEND);
+				gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+				gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+				gl.enableVertexAttribArray(0);
+				gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			},
+			glBindShader: (shader) => {
+				gl.useProgram(getCObject(shader));
+			},
+			glBindTexture: (texture, binding) => {
+				gl.activeTexture(gl.TEXTURE0 + binding);
+				gl.bindTexture(gl.TEXTURE_2D, getCObject(texture));
+			},
+			glViewport: (x, y, w, h) => {
+				gl.viewport(x, y, w, h);
+			},
+			glGenUniformLocation: (shader, name) => {
+				var s = getCObject(shader);
+				var n = getObjectStr(name);
+				var loc = gl.getUniformLocation(s, n);
+				return regCObject(loc);
+			},
+			glSetUniform1f: (location, value) => {
+				gl.uniform1f(getCObject(location), value);
+			},
+			glSetUniform2f: (location, x, y) => {
+				gl.uniform2f(getCObject(location), x, y);
+			},
+			glSetUniform3f: (location, x, y, z) => {
+				gl.uniform3f(getCObject(location), x, y, z);
+			},
+			glSetUniform4f: (location, x, y, z, w) => {
+				gl.uniform4f(getCObject(location), x, y, z, w);
+			},
+			glSetUniform1i: (location, value) => {
+				gl.uniform1i(getCObject(location), value);
+			},
+			glSetUniform2i: (location, x, y) => {
+				gl.uniform2i(getCObject(location), x, y);
+			},
+			glSetUniform3i: (location, x, y, z) => {
+				gl.uniform3i(getCObject(location), x, y, z);
+			},
+			glSetUniform4i: (location, x, y, z, w) => {
+				gl.uniform4i(getCObject(location), x, y, z, w);
+			},
+			drawText: (string, x, y) => {
+				gl2.font = `40px Verdana`;
+				gl2.fillStyle = '#ffffff';
+				gl2.fillText(getObjectStr(string), x, y);
+			},
+			drawScore: (tscore, lscore, x, y, c, d) => {
+				gl2.font = `40px Sixtyfour Convergence`;
+				gl2.fillStyle = '#ffffff';
+				var str = lscore + "->" + tscore + "/" + d;
+				gl2.fillText(str, x - gl2.measureText(str).width * c, y);
+			},
+			playSound: (pointr, volume, pitch, loop) => {
+				var n = 'data:audio/mp3;base64,' + getObjectB64(pointr);
+				var audio = new Audio();
+				audio.src = n;
+				audio.volume = volume;
+				audio.loop = loop;
+				audio.pitch = pitch;
+				audio.play();
+
+			},
+			mouseX: () => {
+				return mx;
+			},
+			mouseY: () => {
+				return my;
+			},
+			isKeyDown: (char) => {
+				return keys[char];
+			},
+			isMouseDown: (button) => {
+				return keys[button];
+			},
+			delete: (uuid) => {
+				var o = deRegCObject(uuid);
+			}
+		};
+
+		var canvas;
+		var gl;
+		var canvas2;
+		var gl2;
+
+		var audio;
+
+		var quadBuffer;
+
+		async function runMainLoop() {
+			prunning = true;
+			gl2.fillStyle = '#000000';
+			var f = 0;
+            while (prunning || f < 1) {
+				gl2.fillRect(0, 0, window.innerWidth, window.innerHeight);
+				gl2.font = `40px Sixtyfour Convergence`;
+				var str = "The Game";
+				gl2.fillText(str, window.innerWidth / 2 - gl2.measureText(str).width / 2, window.innerHeight / 4);
+				str = "(press any button to start)";
+				gl2.font = `14px Sixtyfour Convergence`;
+				gl2.fillText(str, window.innerWidth / 2 - gl2.measureText(str).width / 2, window.innerHeight / 2);
+                gl2.globalAlpha = f;
+				gl2.fillRect(0, 0, window.innerWidth, window.innerHeight);
+				gl2.globalAlpha = 1.0;
+				if (!prunning)
+					f += 1 / 60;
+				await new Promise(r => setTimeout(r, 1000 / 60.0));
+			}
+
+			if (typeof library.init == 'function')
+				library.init();
+			console.log(dumpHeap());
+			if (typeof library.update_F64_I32_I32 == 'function') {
+				let time = window.performance.now();
+				while (true) { /*For ever*/
+					gl2.clearRect(0, 0, canvas2.width, canvas2.height);
+					let delta = Math.min((window.performance.now() - time) / 1000, 1.0 / 30);
+					time = window.performance.now();
+
+					library.update_F64_I32_I32(delta, window.innerWidth, window.innerHeight);
+
+					/*gl2.fillText("Mouse: " + mx + " " + my, 25, 25);*/
+					await new Promise(r => setTimeout(r, 1000 / 60.0));
+				}
+			}
+			else
+				alert("No Update Function! INVALID!!");
+		}
+		function initCode() {
+			/*Init WebGL*/
+			canvas = document.querySelector("#canv");
+			gl = canvas.getContext("webgl2");
+			canvas2 = document.querySelector("#canv2");
+			gl2 = canvas2.getContext("2d");
+			audio = new Audio();
+			/* Only continue if WebGL is available and working*/
+			if (gl === null) {
+				alert("Unable to initialize WebGL. Your browser or machine may not support it.");
+				return;
+			}
+			resizeCanvas();
+			{
+				quadBuffer = gl.createBuffer();
+				gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+				const positions = [1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+			}
+			/*Init native code*/
+			var bin = decode(BINARY_B64);
+			WebAssembly.instantiate(bin, { env, console, gl, Math }).then(
+				(results) => {
+					res = results;
+					library = results.instance.exports;
+					console.log(library);
+					init = true;
+					runMainLoop();
+				});
+		}
+
+
+
+		/*Code snippets from https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/ */
+
+		function initShaderProgram(gl, vsSource, fsSource) {
+			const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+			const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+			const shaderProgram = gl.createProgram();
+			gl.attachShader(shaderProgram, vertexShader);
+			gl.attachShader(shaderProgram, fragmentShader);
+			gl.linkProgram(shaderProgram);
+			if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+				alert(
+					`Unable to initialize the shader program: ${gl.getProgramInfoLog(
+						shaderProgram,
+					)}`,
+				);
+				return null;
+			}
+
+			return shaderProgram;
+		}
+		function loadShader(gl, type, source) {
+			const shader = gl.createShader(type);
+			gl.shaderSource(shader, source);
+			gl.compileShader(shader);
+			if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+				alert(
+					`An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`,
+				);
+				gl.deleteShader(shader);
+				return null;
+			}
+
+			return shader;
+		}
+
+		function loadTexture(gl, url) {
+			const texture = gl.createTexture();
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			const level = 0;
+			const internalFormat = gl.RGBA;
+			const width = 1;
+			const height = 1;
+			const border = 0;
+			const srcFormat = gl.RGBA;
+			const srcType = gl.UNSIGNED_BYTE;
+			const pixel = new Uint8Array([0, 0, 255, 255]);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				level,
+				internalFormat,
+				width,
+				height,
+				border,
+				srcFormat,
+				srcType,
+				pixel,
+			);
+
+			const image = new Image();
+			image.onload = () => {
+				gl.bindTexture(gl.TEXTURE_2D, texture);
+				gl.texImage2D(
+					gl.TEXTURE_2D,
+					level,
+					internalFormat,
+					srcFormat,
+					srcType,
+					image,
+				);
+				if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+					gl.generateMipmap(gl.TEXTURE_2D);
+				}
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			};
+			image.src = url;
+
+			return texture;
+		}
+
+		function isPowerOf2(value) {
+			return (value & (value - 1)) === 0;
+		}
+
+
+
+		function regCObject(object) {
+			var uuid = createUUID();
+			objects[uuid] = object;
+			return uuid;
+		}
+		function deRegCObject(uuid) {
+			var ob = objects[uuid];
+			objects[uuid] = null;
+			return uuid;
+			return ob;
+		}
+		function getCObject(uuid) {
+			return objects[uuid];
+		}
+		function createUUID() {
+			return Math.floor(Math.random() * 5000000);
+		}
+		function decode(string) {
+			return Uint8Array.from(atob(string), c => c.charCodeAt(0));
+		}
+		function getObject(object) {
+			var int32view = new Int32Array(library.memory.buffer);
+			var size = -int32view[object / 4 - 2];
+			if (size < 8)
+				return -size;
+			var float32view = new Float32Array(library.memory.buffer);
+			var int64view = new BigInt64Array(library.memory.buffer);
+			var float64view = new Float64Array(library.memory.buffer);
+			var di32 = int32view.slice(object / 4, object / 4 + size / 4);
+			var df32 = float32view.slice(object / 4, object / 4 + size / 4);
+			var di64 = int64view.slice(object / 8, object / 8 + size / 8);
+			var df64 = float64view.slice(object / 8, object / 8 + size / 8);
+			return { size, di32, df32, di64, df64 };
+		}
+		function getObjectStr(pointer) {
+			var int32view = new Int32Array(library.memory.buffer);
+			var size = -int32view[pointer / 4 - 2];
+			if (size < 8)
+				return -size;
+			const bytes = new Uint8Array(library.memory.buffer, pointer, size - 8);
+			const string = new TextDecoder('ascii').decode(bytes);
+			return string.replace(/\0/g, ''); /*Remove NULL Byte*/
+		}
+		function getObjectB64(pointer) {
+			var int32view = new Int32Array(library.memory.buffer);
+			var uint8view = new Uint8Array(library.memory.buffer, 0, library.memory.buffer.length);
+			var size = -int32view[pointer / 4 - 2];
+			if (size < 8) {
+				return -size;
+			}
+			const bytes = new Uint8Array(library.memory.buffer, pointer, size - 8);
+			var siz = bytes.length - 1;
+			while (bytes[siz] == 0) {
+				siz--;
+			}
+			const bytes2 = new Uint8Array(library.memory.buffer, pointer, siz);
+			return btoa(
+				bytes2.reduce((data, byte) => data + String.fromCharCode(byte), '')
+			);
+		}
+
+		function dumpHeap() {
+			var int8view = new Uint8Array(library.memory.buffer);
+			var int32view = new Int32Array(library.memory.buffer);
+			var pointer = 0;
+			var count = 0;
+			var max = 0;
+			for (var ia = 0; ia < 512; ia++) { /*Max Objects*/
+				var size = int32view[pointer / 4];
+				if (size == 0 || size == undefined) {
+					break;
+				}
+				pointer += Math.abs(size);
+				count++;
+				max = pointer;
+			}
+			var objects = [count];
+			var dc = new TextDecoder('ascii');
+			pointer = 0;
+			for (var ia = 0; ia < count; ia++) {
+				var size = int32view[pointer / 4];
+				var pp = int32view[pointer / 4 + 1];
+				if (size < 0) {
+					objects[ia] = { "p": pointer + 8, "pp": pp, "s": size, "v": dc.decode(new Uint8Array(library.memory.buffer, pointer + 8, Math.abs(size) - 8)) };
+				} else {
+					objects[ia] = { "p": pointer + 8, "pp": pp, "s": size, "v": "#free" };
+				}
+				pointer += Math.abs(size);
+			}
+			return { "count": count, "used": max, "max": int8view.length, "percent": (100 * max / int8view.length), "arr": objects };
+		}
+		function generateTable(data) {
+			let table = '<table>';
+			table += '<tr><th>Pointer</th><th>Prev</th><th>Size</th><th>Content</th><th>Action</th></tr>';
+			data.forEach(item => {
+				var button = item.s < 0 ? "<button type=\"button\" onMouseDown=\"library.free(" + item.p + ");\">Free</button>" : "Free";
+				var style = item.s < 0 ? "" : "background-color:#55DD55";
+				table += `<tr style="${style}"><td>${item.p}</td><td>${item.pp}</td><td>${item.s}</td><td>${item.v.replace(/\0/g, "_")}</td><td>${button}</td></tr>`;
+			});
+			table += '</table>';
+			return table;
+		}
+	</script>
+	<style>
+	</style>
+</body>
+</html>
